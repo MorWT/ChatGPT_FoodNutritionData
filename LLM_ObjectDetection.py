@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, Label, Button
 import io
 import os
+import streamlit as st
 
 # Set your OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -37,45 +38,68 @@ def generate_response(user_input):
     return chain.invoke({"user_input": user_input})
 
 
-# Function to open an image file and process it
-def open_image():
-    # Open a file dialog to select an image file
-    file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
+# # Function to open an image file and process it
+# def open_image():
+#     # Open a file dialog to select an image file
+#     file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
+#
+#     if file_path:
+#         # Load the selected image and display it
+#         image = Image.open(file_path)
+#         image.thumbnail((300, 300))  # Resize for display purposes
+#         img_display = ImageTk.PhotoImage(image)
+#         img_label.config(image=img_display)
+#         img_label.image = img_display
+#
+#         # Process the image and get nutritional information
+#         with open(file_path, "rb") as image_file:
+#             image_data = image_file.read()
+#             try:
+#                 response = generate_response(image_data)
+#                 response_label.config(text=f"Nutritional Information:\n{response}")
+#             except Exception as e:
+#                 response_label.config(text=f"Error: {e}")
+#
+#
+# # Set up the Tkinter GUI
+# root = tk.Tk()
+# root.title("Food Nutrition Assistant")
+# root.geometry("400x500")
+#
+# # Label to display the selected image
+# img_label = Label(root)
+# img_label.pack(pady=10)
+#
+# # Button to open and upload an image
+# upload_btn = Button(root, text="Upload Image", command=open_image)
+# upload_btn.pack(pady=5)
+#
+# # Label to display the nutritional information
+# response_label = Label(root, text="Nutritional Information will appear here", wraplength=300, justify="left")
+# response_label.pack(pady=20)
+#
+# # Run the Tkinter event loop
+# root.mainloop()
 
-    if file_path:
-        # Load the selected image and display it
-        image = Image.open(file_path)
-        image.thumbnail((300, 300))  # Resize for display purposes
-        img_display = ImageTk.PhotoImage(image)
-        img_label.config(image=img_display)
-        img_label.image = img_display
+
+# Using Streamlit
+if __name__ == "__main__":
+    # Streamlit UI
+    st.title("Food Nutrition Assistant")
+
+    # File uploader for image selection
+    uploaded_file = st.file_uploader("Upload an image of food", type=["jpg", "jpeg", "png"])
+
+    if uploaded_file is not None:
+        # Display the uploaded image
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Image", use_column_width=True)
 
         # Process the image and get nutritional information
-        with open(file_path, "rb") as image_file:
-            image_data = image_file.read()
+        with uploaded_file:
             try:
-                response = generate_response(image_data)
-                response_label.config(text=f"Nutritional Information:\n{response}")
+                response = generate_response(image)
+                st.subheader("Nutritional Information:")
+                st.write(response)
             except Exception as e:
-                response_label.config(text=f"Error: {e}")
-
-
-# Set up the Tkinter GUI
-root = tk.Tk()
-root.title("Food Nutrition Assistant")
-root.geometry("400x500")
-
-# Label to display the selected image
-img_label = Label(root)
-img_label.pack(pady=10)
-
-# Button to open and upload an image
-upload_btn = Button(root, text="Upload Image", command=open_image)
-upload_btn.pack(pady=5)
-
-# Label to display the nutritional information
-response_label = Label(root, text="Nutritional Information will appear here", wraplength=300, justify="left")
-response_label.pack(pady=20)
-
-# Run the Tkinter event loop
-root.mainloop()
+                st.write(f"Error: {e}")
