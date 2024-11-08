@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+MAX_TOKENS = 100000
 
 # Set your OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -36,7 +37,7 @@ def process_image(image_source, source_type, max_size=(512, 512)):
         if source_type == "upload":
             image = Image.open(image_source)
         elif source_type == "url":
-            response = requests.get(image_source)
+            response = requests.get(image_source, stream=True)
             response.raise_for_status()
             image = Image.open(BytesIO(response.content))
 
@@ -55,10 +56,24 @@ def process_image(image_source, source_type, max_size=(512, 512)):
         return None, None
 
 
+def validate_token_size(image_b64):
+    if len(image_b64) > MAX_TOKENS:
+        st.error("The encoded image is too large to process. Please use a smaller image.")
+        return False
+    return True
+
+
 # Function to analyze the image using GPT-4o
 def analyze_image(image_b64):
     # Construct the prompt for GPT-4o
     format_instructions = parser.get_format_instructions().replace("{", "{{").replace("}", "}}")
+    # prompt = ChatPromptTemplate.from_messages([
+    #     ("system", f"You are an assistant that detects food items from images. "
+    #                f"Given an image, infer the type of food shown and provide detailed nutritional information "
+    #                f"such as name, calories, fat, and protein per 100g. "
+    #                f"Use the following format: {format_instructions}."),
+    #     ("human", f"Here is the image: data:image/jpeg;base64,{image_b64}")
+    # ])
     prompt = ChatPromptTemplate.from_messages([
         ("system", f"You are an expert nutrition assistant that specializes in identifying food items from images. "
                    f"Given an image of food, you will analyze it to identify the type of food. Once identified, "
@@ -105,17 +120,19 @@ if __name__ == "__main__":
 
     # Analyze and display results
     if image and image_b64:
-        st.image(image, caption="Processed Image", use_column_width=True)
-        st.subheader("Nutritional Information:")
-        response = analyze_image(image_b64)
+        if validate_token_size(image_b64):
+            st.image(image, caption="Processed Image", use_column_width=True)
+            st.subheader("Nutritional Information:")
+            response = analyze_image(image_b64)
 
-        # Display the results
-        if "error" in response:
-            st.error(response["error"])
-        elif isinstance(response, NutritionData):
-            st.write(f"**Food Name:** {response.name}")
-            st.write(f"**Calories (per 100g):** {response.calories}")
-            st.write(f"**Fat (per 100g):** {response.fat}")
-            st.write(f"**Protein (per 100g):** {response.protein}")
-        else:
-            st.error("Unexpected response format.")
+            # Display the results
+            if "error" in response:
+                st.error("The image could not be processed. Please try a smaller image or describe the food item.")
+
+            elif isinstance(response, NutritionData):
+                st.write(f"**Food Name:** {response.name}")
+                st.write(f"**Calories (per 100g):** {response.calories}")
+                st.write(f"**Fat (per 100g):** {response.fat}")
+                st.write(f"**Protein (per 100g):** {response.protein}")
+            else:
+                st.error("Unexpected response format.")
