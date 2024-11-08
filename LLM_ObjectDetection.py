@@ -1,105 +1,106 @@
-import openai
-from PIL import Image, ImageTk
-import torch
-from torchvision import transforms, models
-from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
-from langchain_openai import ChatOpenAI
-from langchain_core.output_parsers.string import StrOutputParser
-import tkinter as tk
-from tkinter import filedialog, Label, Button
-import io
 import os
+import httpx
+import requests
 import streamlit as st
+from PIL import Image
+from base64 import b64encode
+from io import BytesIO
+from pydantic import BaseModel, Field
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+
 
 # Set your OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-print(f"======== {OPENAI_API_KEY}")
 
 # Initialize the language model
-llm = ChatOpenAI(model='gpt-4o', api_key=OPENAI_API_KEY)
+llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
 
-# Define the system prompt for the assistant to provide nutritional information
-system_prompt = SystemMessagePromptTemplate.from_template(
-    "You are an assistant that provides nutritional information about food items. When a food item is specified, "
-    "provide details including calories, fat content, protein, vitamins, and other relevant details."
-)
+
+# Define the NutritionData class for structured output
+class NutritionData(BaseModel):
+    name: str = Field(description="The name of the food shown in the image")
+    calories: float = Field(description="The calories value of the food shown in the image for 100g")
+    fat: float = Field(description="The fat value of the food shown in the image for 100g")
+    protein: float = Field(description="The protein value of the food shown in the image for 100g")
+
+
+# Define the parser using NutritionData
+parser = PydanticOutputParser(pydantic_object=NutritionData)
 
 
 # Function to recognize food and get nutritional information
-def generate_response(user_input):
-    llm.invoke
-    prompt = ChatPromptTemplate([
-        system_prompt,
-        HumanMessagePromptTemplate.from_template("{user_input}")
+def generate_response(image_data, upload_flag, url_flag, image_url):
+    # Convert image bytes to Base64
+    if upload_flag:
+        image_b64 = b64encode(image_data).decode('utf-8')
+
+    elif url_flag:
+        image_b64 = b64encode(httpx.get(image_url).content).decode("utf-8")
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an assistant that provides nutritional information about food items.\n For given image of "
+                   "food, analyze it and provide details such as name, calories, fat, and protein per 100g.\n"
+                   "Use the following format: '{format_instructions}'\n"),
+        ("human", [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/jpeg;base64,{image_data}"},
+            },
+        ]),
     ])
 
-    # Run the prompt chain and parse output as string
-    chain = prompt | llm | StrOutputParser()
-    return chain.invoke({"user_input": user_input})
+    # Run the prompt chain and return parsed output
+    try:
+        chain = prompt | llm | parser
+        result = chain.invoke({
+            "language": "English",
+            "format_instructions": parser.get_format_instructions(),
+            "image_data": image_b64
+        })
+        # Add the parser for structured output
+        # result = chain.invoke({"image_b64": image_b64})
+        return result
+    except Exception as e:
+        return f"Error: {e}"
 
 
-# # Function to open an image file and process it
-# def open_image():
-#     # Open a file dialog to select an image file
-#     file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
-#
-#     if file_path:
-#         # Load the selected image and display it
-#         image = Image.open(file_path)
-#         image.thumbnail((300, 300))  # Resize for display purposes
-#         img_display = ImageTk.PhotoImage(image)
-#         img_label.config(image=img_display)
-#         img_label.image = img_display
-#
-#         # Process the image and get nutritional information
-#         with open(file_path, "rb") as image_file:
-#             image_data = image_file.read()
-#             try:
-#                 response = generate_response(image_data)
-#                 response_label.config(text=f"Nutritional Information:\n{response}")
-#             except Exception as e:
-#                 response_label.config(text=f"Error: {e}")
-#
-#
-# # Set up the Tkinter GUI
-# root = tk.Tk()
-# root.title("Food Nutrition Assistant")
-# root.geometry("400x500")
-#
-# # Label to display the selected image
-# img_label = Label(root)
-# img_label.pack(pady=10)
-#
-# # Button to open and upload an image
-# upload_btn = Button(root, text="Upload Image", command=open_image)
-# upload_btn.pack(pady=5)
-#
-# # Label to display the nutritional information
-# response_label = Label(root, text="Nutritional Information will appear here", wraplength=300, justify="left")
-# response_label.pack(pady=20)
-#
-# # Run the Tkinter event loop
-# root.mainloop()
-
-
-# Using Streamlit
+# Streamlit interface
 if __name__ == "__main__":
-    # Streamlit UI
+    url_flag = False
+    upload_flag = False
+
     st.title("Food Nutrition Assistant")
 
-    # File uploader for image selection
+    # Option to upload an image
     uploaded_file = st.file_uploader("Upload an image of food", type=["jpg", "jpeg", "png"])
 
-    if uploaded_file is not None:
-        # Display the uploaded image
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+    # Option to provide an image URL
+    image_url = st.text_input("Or provide a link to an image")
 
-        # Process the image and get nutritional information
-        with uploaded_file:
-            try:
-                response = generate_response(image)
-                st.subheader("Nutritional Information:")
-                st.write(response)
-            except Exception as e:
-                st.write(f"Error: {e}")
+    if uploaded_file or image_url:
+        try:
+            # Load the image from file or URL
+            if uploaded_file:
+                image = Image.open(uploaded_file)
+                image_data = uploaded_file.read()
+                st.image(image, caption="Uploaded Image", use_column_width=True)
+                upload_flag = True
+                image_url = False
+
+            else:
+                response = requests.get(image_url)
+                response.raise_for_status()  # Ensure the URL is valid
+                image_data = BytesIO(response.content).read()
+                image = Image.open(BytesIO(response.content))
+                st.image(image, caption="Image from URL", use_column_width=True)
+                upload_flag = True
+
+            # Get nutritional information
+            st.subheader("Nutritional Information:")
+            response = generate_response(image_data, upload_flag, url_flag, image_url)
+            st.write(response)
+
+        except Exception as e:
+            st.error(f"Error processing the image: {e}")
