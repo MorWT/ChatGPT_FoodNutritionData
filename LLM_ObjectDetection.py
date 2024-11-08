@@ -1,5 +1,4 @@
 import os
-import httpx
 import requests
 import streamlit as st
 from PIL import Image
@@ -30,77 +29,93 @@ class NutritionData(BaseModel):
 parser = PydanticOutputParser(pydantic_object=NutritionData)
 
 
-# Function to recognize food and get nutritional information
-def generate_response(image_data, upload_flag, url_flag, image_url):
-    # Convert image bytes to Base64
-    if upload_flag:
-        image_b64 = b64encode(image_data).decode('utf-8')
+# Function to process and re-encode the image as Base64
+def process_image(image_source, source_type, max_size=(512, 512)):
+    try:
+        # Load the image from the file or URL
+        if source_type == "upload":
+            image = Image.open(image_source)
+        elif source_type == "url":
+            response = requests.get(image_source)
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content))
 
-    elif url_flag:
-        image_b64 = b64encode(httpx.get(image_url).content).decode("utf-8")
+        # Resize the image to reduce size
+        image = image.convert("RGB")
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)  # Use LANCZOS for high-quality resizing
 
+        # Convert to Base64
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG")
+        image_data = buffer.getvalue()
+        image_b64 = b64encode(image_data).decode("utf-8")
+        return image, image_b64
+    except Exception as e:
+        st.error(f"Error processing the image: {e}")
+        return None, None
+
+
+# Function to analyze the image using GPT-4o
+def analyze_image(image_b64):
+    # Construct the prompt for GPT-4o
+    format_instructions = parser.get_format_instructions().replace("{", "{{").replace("}", "}}")
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an assistant that provides nutritional information about food items.\n For given image of "
-                   "food, analyze it and provide details such as name, calories, fat, and protein per 100g.\n"
-                   "Use the following format: '{format_instructions}'\n"),
-        ("human", [
-            {
-                "type": "image_url",
-                "image_url": {"url": "data:image/jpeg;base64,{image_data}"},
-            },
-        ]),
+        ("system", f"You are an expert nutrition assistant that specializes in identifying food items from images. "
+                   f"Given an image of food, you will analyze it to identify the type of food. Once identified, "
+                   f"you will provide nutritional details such as name, calories, fat, and protein per 100g. "
+                   f"Base64-encoded images will be provided, and your response must follow this format: {format_instructions}."),
+        ("human", f"Here is the image: data:image/jpeg;base64,{image_b64}")
     ])
 
-    # Run the prompt chain and return parsed output
+    # Run the chain
     try:
         chain = prompt | llm | parser
         result = chain.invoke({
             "language": "English",
-            "format_instructions": parser.get_format_instructions(),
-            "image_data": image_b64
+            "format_instructions": format_instructions
         })
-        # Add the parser for structured output
-        # result = chain.invoke({"image_b64": image_b64})
         return result
     except Exception as e:
-        return f"Error: {e}"
+        return {"error": str(e)}
 
 
 # Streamlit interface
 if __name__ == "__main__":
-    url_flag = False
-    upload_flag = False
-
     st.title("Food Nutrition Assistant")
 
-    # Option to upload an image
-    uploaded_file = st.file_uploader("Upload an image of food", type=["jpg", "jpeg", "png"])
+    # Input options
+    st.subheader("Input Options:")
+    upload_flag = st.checkbox("Upload an image from your computer")
+    url_flag = st.checkbox("Provide a URL to an image")
 
-    # Option to provide an image URL
-    image_url = st.text_input("Or provide a link to an image")
+    image = None
+    image_b64 = None
 
-    if uploaded_file or image_url:
-        try:
-            # Load the image from file or URL
-            if uploaded_file:
-                image = Image.open(uploaded_file)
-                image_data = uploaded_file.read()
-                st.image(image, caption="Uploaded Image", use_column_width=True)
-                upload_flag = True
-                image_url = False
+    # Process uploaded image
+    if upload_flag:
+        uploaded_file = st.file_uploader("Upload an image of food", type=["jpg", "jpeg", "png"])
+        if uploaded_file:
+            image, image_b64 = process_image(uploaded_file, source_type="upload")
 
-            else:
-                response = requests.get(image_url)
-                response.raise_for_status()  # Ensure the URL is valid
-                image_data = BytesIO(response.content).read()
-                image = Image.open(BytesIO(response.content))
-                st.image(image, caption="Image from URL", use_column_width=True)
-                upload_flag = True
+    # Process URL image
+    if url_flag:
+        image_url = st.text_input("Enter the image URL")
+        if image_url:
+            image, image_b64 = process_image(image_url, source_type="url")
 
-            # Get nutritional information
-            st.subheader("Nutritional Information:")
-            response = generate_response(image_data, upload_flag, url_flag, image_url)
-            st.write(response)
+    # Analyze and display results
+    if image and image_b64:
+        st.image(image, caption="Processed Image", use_column_width=True)
+        st.subheader("Nutritional Information:")
+        response = analyze_image(image_b64)
 
-        except Exception as e:
-            st.error(f"Error processing the image: {e}")
+        # Display the results
+        if "error" in response:
+            st.error(response["error"])
+        elif isinstance(response, NutritionData):
+            st.write(f"**Food Name:** {response.name}")
+            st.write(f"**Calories (per 100g):** {response.calories}")
+            st.write(f"**Fat (per 100g):** {response.fat}")
+            st.write(f"**Protein (per 100g):** {response.protein}")
+        else:
+            st.error("Unexpected response format.")
