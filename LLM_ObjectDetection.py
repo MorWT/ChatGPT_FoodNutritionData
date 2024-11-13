@@ -1,138 +1,141 @@
 import os
+import base64
 import requests
 import streamlit as st
-from PIL import Image
-from base64 import b64encode
-from io import BytesIO
-from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
-from langchain_core.output_parsers.pydantic import PydanticOutputParser
+from urllib.parse import urlparse
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from PIL import Image
 
-MAX_TOKENS = 100000
-
-# Set your OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Initialize the language model
-llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
 
-
-# Define the NutritionData class for structured output
 class NutritionData(BaseModel):
-    name: str = Field(description="The name of the food shown in the image")
-    calories: float = Field(description="The calories value of the food shown in the image for 100g")
-    fat: float = Field(description="The fat value of the food shown in the image for 100g")
-    protein: float = Field(description="The protein value of the food shown in the image for 100g")
+    name: str = Field(description="The name of a food item")
+    calories_per_100g: float = Field(description="The calories value of the food item per 100g")
+    fat_per_100g: float = Field(description="The fat value of the food of the food item per 100g")
+    protein_per_100g: float = Field(description="The protein value of  the food item per 100g")
+    weight_grams: float = Field(description="The estimated weight of the food item in grams")
+
+
+class ImageRecognitionResult(BaseModel):
+    food_items: list[NutritionData]
+
+
+# Step 1: Check if the image_path is a URL
+def is_url(path):
+    try:
+        result = urlparse(path)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
+
+
+def download_image(image_path):
+    # Step 2: Download the image
+    response = requests.get(image_path, stream=True)
+    if response.status_code == 200:
+        local_filename = "downloaded_image.jpg"  # Save the image with a local filename
+        with open(local_filename, "wb") as img_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                img_file.write(chunk)
+        image_path = local_filename  # Update image_path to the local file
+    else:
+        raise Exception(f"Failed to download image from URL: {image_path}")
+
+    return image_path
+
+
+def resize_image_to_max_500px(image_path):
+    """
+    Resizes an image to ensure the maximum side is 500 pixels while maintaining the aspect ratio.
+    If the image is already within the size limit, it returns the original path.
+    Otherwise, it saves and returns the path to the resized image.
+
+    Args:
+        image_path (str): The path to the input image.
+
+    Returns:
+        str: The path to the resized image or the original path if resizing was not needed.
+    """
+    with Image.open(image_path) as img:
+        max_side = max(img.size)
+
+        # Check if the image exceeds the size limit
+        if max_side <= 500:
+            return image_path  # Return original path if resizing is not needed
+
+        # Calculate the resize ratio to fit the maximum side to 500px
+        ratio = 500 / max_side
+        new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+
+        # Resize the image
+        resized_img = img.resize(new_size, Image.Resampling.LANCZOS)  # Use the updated resampling method
+
+        # Save the resized image to a new file
+        resized_image_path = "resized_" + os.path.basename(image_path)
+        resized_img.save(resized_image_path)
+
+        return resized_image_path  # Return the path to the resized image
 
 
 # Define the parser using NutritionData
 parser = PydanticOutputParser(pydantic_object=NutritionData)
 
-
-# Function to process and re-encode the image as Base64
-def process_image(image_source, source_type, max_size=(512, 512)):
-    try:
-        # Load the image from the file or URL
-        if source_type == "upload":
-            image = Image.open(image_source)
-        elif source_type == "url":
-            response = requests.get(image_source, stream=True)
-            response.raise_for_status()
-            image = Image.open(BytesIO(response.content))
-
-        # Resize the image to reduce size
-        image = image.convert("RGB")
-        image.thumbnail(max_size, Image.Resampling.LANCZOS)  # Use LANCZOS for high-quality resizing
-
-        # Convert to Base64
-        buffer = BytesIO()
-        image.save(buffer, format="JPEG")
-        image_data = buffer.getvalue()
-        image_b64 = b64encode(image_data).decode("utf-8")
-        return image, image_b64
-    except Exception as e:
-        st.error(f"Error processing the image: {e}")
-        return None, None
+llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
 
 
-def validate_token_size(image_b64):
-    if len(image_b64) > MAX_TOKENS:
-        st.error("The encoded image is too large to process. Please use a smaller image.")
-        return False
-    return True
+def process_image(image_path):
+    if is_url(image_path):
+        image_path = download_image(image_path)
 
+    image_path = resize_image_to_max_500px(image_path)
 
-# Function to analyze the image using GPT-4o
-def analyze_image(image_b64):
-    # Construct the prompt for GPT-4o
-    format_instructions = parser.get_format_instructions().replace("{", "{{").replace("}", "}}")
-    # prompt = ChatPromptTemplate.from_messages([
-    #     ("system", f"You are an assistant that detects food items from images. "
-    #                f"Given an image, infer the type of food shown and provide detailed nutritional information "
-    #                f"such as name, calories, fat, and protein per 100g. "
-    #                f"Use the following format: {format_instructions}."),
-    #     ("human", f"Here is the image: data:image/jpeg;base64,{image_b64}")
-    # ])
+    # Step 1: Read the image in binary mode and encode it in Base64
+    with open(image_path, "rb") as img_file:
+        image_b64 = base64.b64encode(img_file.read()).decode("utf-8")
+
+    # Step 2: Update the prompt to include the Base64-encoded image
+    human_message = HumanMessage(
+        content=[
+            {"type": "text", "text": "describe the weather in this image"},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+            },
+        ],
+    )
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are an expert nutrition assistant that specializes in identifying food items from images. "
-                   f"Given an image of food, you will analyze it to identify the type of food. Once identified, "
-                   f"you will provide nutritional details such as name, calories, fat, and protein per 100g. "
-                   f"Base64-encoded images will be provided, and your response must follow this format: {format_instructions}."),
-        ("human", f"Here is the image: data:image/jpeg;base64,{image_b64}")
+        ("system", "You are an expert nutrition assistant that specializes in identifying food items from images. "
+                   "Given an image of food, you will analyze it to identify all the types of food and ingredients. "
+                   "Once identified, "
+                   "you will provide nutritional details such as name, calories, fat, and protein per 100g. "
+                   "Base64-encoded images will be provided"),
+        human_message
     ])
 
-    # Run the chain
-    try:
-        chain = prompt | llm | parser
-        result = chain.invoke({
-            "language": "English",
-            "format_instructions": format_instructions
-        })
-        return result
-    except Exception as e:
-        return {"error": str(e)}
+    # Step 3: Create a chain and pass the Base64 image
+    chain = prompt | llm.with_structured_output(ImageRecognitionResult)
+    result = chain.invoke({
+        "image_b64": image_b64  # Pass the Base64-encoded image string here
+    })
+
+    return result.model_dump_json(indent=2)
 
 
-# Streamlit interface
 if __name__ == "__main__":
     st.title("Food Nutrition Assistant")
 
-    # Input options
-    st.subheader("Input Options:")
-    upload_flag = st.checkbox("Upload an image from your computer")
-    url_flag = st.checkbox("Provide a URL to an image")
+    image_path = st.text_input("Provide a link to JPEG image")
 
-    image = None
-    image_b64 = None
-
-    # Process uploaded image
-    if upload_flag:
-        uploaded_file = st.file_uploader("Upload an image of food", type=["jpg", "jpeg", "png"])
-        if uploaded_file:
-            image, image_b64 = process_image(uploaded_file, source_type="upload")
-
-    # Process URL image
-    if url_flag:
-        image_url = st.text_input("Enter the image URL")
-        if image_url:
-            image, image_b64 = process_image(image_url, source_type="url")
-
-    # Analyze and display results
-    if image and image_b64:
-        if validate_token_size(image_b64):
-            st.image(image, caption="Processed Image", use_column_width=True)
-            st.subheader("Nutritional Information:")
-            response = analyze_image(image_b64)
-
-            # Display the results
-            if "error" in response:
-                st.error("The image could not be processed. Please try a smaller image or describe the food item.")
-
-            elif isinstance(response, NutritionData):
-                st.write(f"**Food Name:** {response.name}")
-                st.write(f"**Calories (per 100g):** {response.calories}")
-                st.write(f"**Fat (per 100g):** {response.fat}")
-                st.write(f"**Protein (per 100g):** {response.protein}")
-            else:
-                st.error("Unexpected response format.")
+    if image_path:
+        try:
+            st.image(image_path, caption="Uploaded Image", use_column_width=True)
+            st.write("Processing the image...")
+            result = process_image(image_path)
+            st.json(result)  # Display the result in JSON format
+        except Exception as e:
+            st.error(f"Error processing image: {str(e)}")
