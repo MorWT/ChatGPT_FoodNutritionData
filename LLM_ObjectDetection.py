@@ -88,7 +88,9 @@ parser = PydanticOutputParser(pydantic_object=NutritionData)
 llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
 
 
-def process_image(image_path):
+def process_image(image_path, OPENAI_API_KEY):
+    llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
+
     if is_url(image_path):
         image_path = download_image(image_path)
 
@@ -128,14 +130,15 @@ def process_image(image_path):
 
 if __name__ == "__main__":
     st.title("Food Nutrition Assistant")
+    OPENAI_API_KEY = st.text_input("Provide your OPENAI key")
+    if OPENAI_API_KEY:
+        image_path = st.text_input("Provide a link to an image")
 
-    image_path = st.text_input("Provide a link to JPEG image")
-
-    if image_path:
-        try:
-            st.image(image_path, caption="Uploaded Image", use_column_width=True)
-            st.write("Processing the image...")
-            result = process_image(image_path)
-            st.json(result)  # Display the result in JSON format
-        except Exception as e:
-            st.error(f"Error processing image: {str(e)}")
+        if image_path:
+            try:
+                st.image(image_path, caption="Uploaded Image", use_column_width=True)
+                st.write("Processing the image...")
+                result = process_image(image_path, OPENAI_API_KEY)
+                st.json(result)  # Display the result in JSON format
+            except Exception as e:
+                st.error(f"Error processing image: {str(e)}")
