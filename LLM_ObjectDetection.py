@@ -9,6 +9,7 @@ from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from PIL import Image
+import json
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -139,6 +140,22 @@ if __name__ == "__main__":
                 st.image(image_path, caption="Uploaded Image", use_column_width=True)
                 st.write("Processing the image...")
                 result = process_image(image_path, OPENAI_API_KEY)
-                st.json(result)  # Display the result in JSON format
+
+                # Parse the JSON string into a dictionary
+                result_dict = json.loads(result)
+
+                # Convert dictionary to ImageRecognitionResult object
+                result_data = ImageRecognitionResult(**result_dict)
+
+                # Display results in the desired format
+                st.markdown("### Food Items:")
+                for idx, item in enumerate(result_data.food_items):
+                    st.markdown(f"""
+                            **{idx + 1}. Food name:** {item.name.capitalize()}  
+                            - **Calories (per 100g):** {item.calories_per_100g}  
+                            - **Fat (per 100g):** {item.fat_per_100g}  
+                            - **Protein (per 100g):** {item.protein_per_100g}  
+                            - **Weight (grams):** {item.weight_grams}  
+                            """)
             except Exception as e:
                 st.error(f"Error processing image: {str(e)}")
