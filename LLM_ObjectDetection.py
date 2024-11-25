@@ -2,6 +2,7 @@ import os
 import base64
 import requests
 import streamlit as st
+import pandas as pd
 from urllib.parse import urlparse
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -11,7 +12,8 @@ from langchain_core.messages import HumanMessage
 from PIL import Image
 import json
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = ('sk-proj-zRcdPL6FzeYco9zbuJA7IAGLRGUKpLDwA8mWE170y1tQbqdAxTAQnIy69LIN4chYjyTUMGzWA9T3BlbkFJySLP3EvBqq'
+                  'PalucM9_nLTD6m_q_465dK9ArhMDcr2Z1DCaD5KrgrRbTkdE1_RK8H2rJUFQKeEA')
 
 
 class NutritionData(BaseModel):
@@ -89,7 +91,7 @@ parser = PydanticOutputParser(pydantic_object=NutritionData)
 llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
 
 
-def process_image(image_path, OPENAI_API_KEY):
+def process_image(image_path):
     llm = ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
 
     if is_url(image_path):
@@ -114,9 +116,8 @@ def process_image(image_path, OPENAI_API_KEY):
     prompt = ChatPromptTemplate.from_messages([
         ("system", "You are an expert nutrition assistant that specializes in identifying food items from images. "
                    "Given an image of food, you will analyze it to identify all the types of food and ingredients. "
-                   "Once identified, "
-                   "you will provide nutritional details such as name, calories, fat, and protein per 100g. "
-                   "Base64-encoded images will be provided"),
+                   "Once identified, you will provide nutritional details such as name, calories, fat, and protein per "
+                   "100g. Base64-encoded images will be provided"),
         human_message
     ])
 
@@ -130,32 +131,48 @@ def process_image(image_path, OPENAI_API_KEY):
 
 
 if __name__ == "__main__":
+    counter = 0
     st.title("Food Nutrition Assistant")
-    OPENAI_API_KEY = st.text_input("Provide your OPENAI key")
-    if OPENAI_API_KEY:
-        image_path = st.text_input("Provide a link to an image")
+    image_path = st.text_input("Provide a link to an image", key=f"image_path_{counter}")
 
-        if image_path:
-            try:
-                st.image(image_path, caption="Uploaded Image", use_column_width=True)
-                st.write("Processing the image...")
-                result = process_image(image_path, OPENAI_API_KEY)
+    if image_path:
+        try:
+            st.image(image_path, caption="Uploaded Image", use_column_width=True)
+            st.write("Processing the image...")
+            result = process_image(image_path)
 
-                # Parse the JSON string into a dictionary
-                result_dict = json.loads(result)
+            # Parse the JSON string into a dictionary
+            result_dict = json.loads(result)
 
-                # Convert dictionary to ImageRecognitionResult object
-                result_data = ImageRecognitionResult(**result_dict)
+            # Convert dictionary to ImageRecognitionResult object
+            result_data = ImageRecognitionResult(**result_dict)
 
-                # Display results in the desired format
-                st.markdown("### Food Items:")
-                for idx, item in enumerate(result_data.food_items):
-                    st.markdown(f"""
-                            **{idx + 1}. Food name:** {item.name.capitalize()}  
-                            - **Calories (per 100g):** {item.calories_per_100g}  
-                            - **Fat (per 100g):** {item.fat_per_100g}  
-                            - **Protein (per 100g):** {item.protein_per_100g}  
-                            - **Weight (grams):** {item.weight_grams}  
-                            """)
-            except Exception as e:
-                st.error(f"Error processing image: {str(e)}")
+            food_calories = []
+            total_calories = 0
+
+            # Perform calculations for each food item
+            for item in result_data.food_items:
+                item_calories = (item.calories_per_100g / 100) * item.weight_grams
+                total_calories += item_calories
+                food_calories.append({
+                    "Food Name": item.name.capitalize(),
+                    "Calories (per 100g)": item.calories_per_100g,
+                    "Fat (per 100g)": item.fat_per_100g,
+                    "Protein (per 100g)": item.protein_per_100g,
+                    "Weight (grams)": item.weight_grams,
+                    "Calories (in image)": round(item_calories, 2)
+                })
+
+
+            # Convert to DataFrame for display
+            df = pd.DataFrame(food_calories)
+
+            # Display the table in Streamlit
+            st.markdown("### Calories Calculation Table")
+            st.dataframe(df)
+
+            # Display the total calories
+            st.markdown(f"### Total Calories in Image: {round(total_calories, 2)}")
+
+        except Exception as e:
+            st.error(f"Error processing image: {str(e)}")
