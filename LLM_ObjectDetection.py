@@ -143,6 +143,34 @@ def main_app():
             st.error(f"Error processing image: {e}")
             return df
 
+    def calculate_daily_calories(gender, weight, height, age, activity_level):
+        if gender == "Male":
+            bmr = 10 * weight + 6.25 * height - 5 * age + 5
+        else:
+            bmr = 10 * weight + 6.25 * height - 5 * age - 161
+
+        activity_multiplier = {
+            "Sedentary": 1.2,
+            "Lightly active": 1.375,
+            "Moderately active": 1.55,
+            "Very active": 1.725,
+            "Extra active": 1.9
+        }
+        return bmr * activity_multiplier[activity_level]
+
+    # Sidebar for user details
+    st.sidebar.markdown("## Enter Your Details")
+    user_gender = st.sidebar.selectbox("Gender", ["Male", "Female"])
+    user_weight = st.sidebar.number_input("Weight (kg)", min_value=30, max_value=200, value=70)
+    user_height = st.sidebar.number_input("Height (cm)", min_value=100, max_value=250, value=170)
+    user_age = st.sidebar.number_input("Age", min_value=10, max_value=120, value=30)
+    user_activity_level = st.sidebar.selectbox(
+        "Activity Level",
+        ["Sedentary", "Lightly active", "Moderately active", "Very active", "Extra active"]
+    )
+
+    daily_calories = calculate_daily_calories(user_gender, user_weight, user_height, user_age, user_activity_level)
+
     # Initialize session state
     if "nutrition_df" not in st.session_state:
         df_columns = [
@@ -167,8 +195,56 @@ def main_app():
     if not st.session_state.nutrition_df.empty:
         st.markdown("### Summary of All Meals")
         st.dataframe(st.session_state.nutrition_df)
-        st.markdown(f"### Total Calories for Today: {st.session_state.nutrition_df['Calories (in image)'].sum()}")
-        st.markdown("##### For additional images analysis enter new image URL and press the 'Process Image' button")
+        total_calories_today = st.session_state.nutrition_df['Calories (in image)'].sum()
+        st.markdown(
+            f"""
+                    ### Total Calories for Today:  
+                    - **Calories Consumed**: {total_calories_today:.2f} kcal  
+                    - **Remaining Calories**: {max(daily_calories - total_calories_today, 0):.2f} kcal  
+                    """
+        )
+
+        total_protein = st.session_state.nutrition_df["Protein (per 100g)"].sum()
+        total_fat = st.session_state.nutrition_df["Fat (per 100g)"].sum()
+        total_calories = st.session_state.nutrition_df["Calories (in image)"].sum()
+
+        # Display requirements first
+        st.sidebar.markdown("### Daily Nutritional Requirements")
+        st.sidebar.markdown(
+            f"""
+                    - **Calories**: {daily_calories:.2f} kcal  
+                    - **Protein**: {(daily_calories * 0.2) / 4:.2f} g  
+                    - **Fat**: {(daily_calories * 0.3) / 9:.2f} g  
+                    """
+        )
+
+        # Nutritional Analysis
+        st.sidebar.markdown("### Nutrient Analysis")
+        if total_calories >= daily_calories:
+            st.sidebar.markdown(f"✅ <span style='color:green;'>You have met your calorie requirement!</span>",
+                                unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(
+                f"⚠️ <span style='color:red;'>You are lacking {daily_calories - total_calories:.2f} kcal.</span>",
+                unsafe_allow_html=True)
+
+        if total_protein >= (daily_calories * 0.2) / 4:
+            st.sidebar.markdown(f"✅ <span style='color:green;'>You have met your protein requirement!</span>",
+                                unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(
+                f"⚠️ <span style='color:red;'>You are lacking {((daily_calories * 0.2) / 4) - total_protein:.2f} g of protein.</span>",
+                unsafe_allow_html=True)
+
+        if total_fat >= (daily_calories * 0.3) / 9:
+            st.sidebar.markdown(f"✅ <span style='color:green;'>You have met your fat requirement!</span>",
+                                unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(
+                f"⚠️ <span style='color:red;'>You are lacking {((daily_calories * 0.3) / 9) - total_fat:.2f} g of fat.</span>",
+                unsafe_allow_html=True)
+
+    st.markdown("##### For additional images analysis enter new image URL and press the 'Process Image' button")
 
 
 if st.session_state["page"] == "main":
