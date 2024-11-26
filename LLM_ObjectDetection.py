@@ -6,26 +6,20 @@ import streamlit as st
 from urllib.parse import urlparse
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
-from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from PIL import Image
 import json
 from datetime import datetime
-import pickle
-from pathlib import Path
-import streamlit_authenticator as stauth
-from dependencies import sign_up, login
-from create_DB import init_db
+from dependencies import sign_up, logout
+from create_DB import get_user_by_username
+import bcrypt
 
 
 OPENAI_API_KEY = ('sk-proj-zRcdPL6FzeYco9zbuJA7IAGLRGUKpLDwA8mWE170y1tQbqdAxTAQnIy69LIN4chYjyTUMGzWA9T3BlbkFJySLP3EvBqq'
                   'PalucM9_nLTD6m_q_465dK9ArhMDcr2Z1DCaD5KrgrRbTkdE1_RK8H2rJUFQKeEA')
 
-
-init_db()
-
-# Initialize session state for navigation
+# Initialize session state variables
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 if "page" not in st.session_state:
@@ -33,13 +27,10 @@ if "page" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state["username"] = ""
 
-# Debugging state
-st.write(f"DEBUG: logged_in = {st.session_state['logged_in']}, page = {st.session_state['page']}")
 
-
-# Function to handle the main application logic
+# Main application logic
 def main_app():
-    st.sidebar.button("Logout", on_click=lambda: st.session_state.update({"logged_in": False, "page": "login"}))
+    st.sidebar.button("Logout", on_click=logout)
     st.sidebar.write(f"Welcome, {st.session_state['username']}")
     st.title("Food Nutrition Assistant")
 
@@ -123,7 +114,7 @@ def main_app():
 
     def display_nutrition_values(image_path, df):
         try:
-            st.image(image_path, caption="Uploaded Image", use_column_width=True)
+            st.image(image_path, caption="Uploaded Image", use_container_width=True)
             st.write("Processing the image...")
             result = process_image(image_path)
             result_dict = json.loads(result)
@@ -179,17 +170,28 @@ def main_app():
         st.markdown(f"### Total Calories for Today: {st.session_state.nutrition_df['Calories (in image)'].sum()}")
         st.markdown("##### For additional images analysis enter new image URL and press the 'Process Image' button")
 
-# Navigation logic
-if st.session_state["logged_in"]:
-    st.session_state["page"] = "main"
 
 if st.session_state["page"] == "main":
     main_app()
 else:
     st.sidebar.write("Choose an option:")
     option = st.sidebar.radio("Authentication", ["Login", "Sign Up"])
-
     if option == "Login":
-        login()
+        st.title("Login Page")
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", placeholder="Enter your password", type="password")
+
+        if st.button("Log In"):
+            # Retrieve user by username from MongoDB
+            user = get_user_by_username(username)
+
+            if user and bcrypt.checkpw(password.encode("utf-8"), user["hashed_password"]):
+                # Successful login
+                st.session_state["logged_in"] = True
+                st.session_state["page"] = "main"
+                st.session_state["username"] = user["username"]
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
     elif option == "Sign Up":
         sign_up()

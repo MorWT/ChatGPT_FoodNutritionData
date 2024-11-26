@@ -1,46 +1,24 @@
-import sqlite3
-import streamlit as st
+from pymongo import MongoClient
+
+# MongoDB connection
+client = MongoClient("mongodb+srv://morwainberg97:3TtM2fXksWKU6qll@cluster0.kesvk.mongodb.net/?retryWrites=true&w="
+                     "majority&appName=Cluster0")
+db = client["auth_demo"]  # Database name
+users_collection = db["users"]  # Collection name
 
 
-# Initialize the database
 def init_db():
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        hashed_password TEXT NOT NULL
-    )
-    """)
-    conn.commit()
-    conn.close()
+    """Initialize the database with indexes if needed."""
+    users_collection.create_index("username", unique=True)
+    users_collection.create_index("email", unique=True)
 
 
-# Add a new user
-def add_user(email, username, hashed_password):
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO users (email, username, hashed_password) VALUES (?, ?, ?)",
-                   (email, username, hashed_password))
-    conn.commit()
-    conn.close()
+def get_user_by_username(username):
+    """Retrieve a user document by username."""
+    return users_collection.find_one({"username": username})
 
 
-def get_user_password(username):
-    try:
-        conn = sqlite3.connect("users.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT hashed_password FROM users WHERE username = ?", (username,))
-        result = cursor.fetchone()
-        conn.close()
-
-        if result:
-            return result[0]  # Return the hashed password
-        return None  # User not found
-    except Exception as e:
-        st.write(f"DEBUG: Database error = {e}")
-        return None
-
-
+def add_user(username, email, hashed_password):
+    """Add a new user to the database."""
+    user = {"username": username, "email": email, "hashed_password": hashed_password}
+    users_collection.insert_one(user)
