@@ -20,10 +20,8 @@ The **ChatGPT Food Nutrition Assistant** is a user-friendly application designed
 1. **Python Environment**: Python 3.8 or higher.
 2. **MongoDB Database**: A running MongoDB instance with connection details in `create_DB.py`.
 3. **Environment Variables**: Set up an `.env` file with your OpenAI API key: OPENAI_API_KEY=<Your OpenAI API Key>
-4. **Dependencies**: Install required Python packages using the provided `requirements.txt` file:
-```bash
-pip install -r requirements.txt
-```
+4. **Dependencies**: All required Python packages exist in the poetry environment
+
 ---
 
 ## How to Run
@@ -50,6 +48,7 @@ OPENAI_API_KEY=<Your OpenAI API Key>
 ### 4. Run the Application
 Launch the application using Streamlit:
 ```bash
+poetry shell
 streamlit run LLM_ObjectDetection.py
 ```
 
